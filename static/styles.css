@@ -147,9 +147,11 @@ input[type="number"] {
   color: var(--text);
 }
 
-.genre-chip:disabled {
+/* Use blocked class instead of disabled so clicks always work on selected chips */
+.genre-chip--blocked {
   opacity: 0.45;
   cursor: not-allowed;
+  pointer-events: none;
 }
 
 .hint {

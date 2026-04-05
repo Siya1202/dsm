@@ -13,10 +13,28 @@ const els = {
 
 let genres = [];
 let selected = new Set();
+let picksRequestGen = 0;
+let userSwitchTimer = null;
+let initialBoot = true;
+/** Last user id we loaded picks/feed for; ignore spurious input when id unchanged. */
+let lastAppliedUserId = null;
 
-function uid() {
-  const n = parseInt(els.userId.value, 10);
-  return Number.isFinite(n) && n >= 1 ? n : 1;
+function validGenreIdSet() {
+  return new Set(genres.map((g) => g.id));
+}
+
+function currentUserId() {
+  const v = els.userId.value.trim();
+  if (v === "") return null;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n >= 1 ? n : null;
+}
+
+function sanitizeSelected() {
+  const ok = validGenreIdSet();
+  for (const id of [...selected]) {
+    if (!ok.has(id)) selected.delete(id);
+  }
 }
 
 async function fetchJson(path, options = {}) {
@@ -40,6 +58,11 @@ async function fetchJson(path, options = {}) {
   return data;
 }
 
+function clearGenreSelection() {
+  selected.clear();
+  syncChipState();
+}
+
 function renderGenres() {
   els.genreGrid.innerHTML = "";
   genres.forEach((g) => {
@@ -48,13 +71,14 @@ function renderGenres() {
     btn.className = "genre-chip";
     btn.dataset.id = String(g.id);
     btn.textContent = g.name;
-    btn.addEventListener("click", () => toggleGenre(g.id, btn));
+    btn.setAttribute("aria-pressed", "false");
     els.genreGrid.appendChild(btn);
   });
   syncChipState();
 }
 
-function toggleGenre(id, btn) {
+function toggleGenre(id) {
+  sanitizeSelected();
   if (selected.has(id)) {
     selected.delete(id);
   } else {
@@ -65,14 +89,28 @@ function toggleGenre(id, btn) {
 }
 
 function syncChipState() {
+  sanitizeSelected();
   const chips = els.genreGrid.querySelectorAll(".genre-chip");
   chips.forEach((chip) => {
     const id = parseInt(chip.dataset.id, 10);
     const on = selected.has(id);
     chip.classList.toggle("selected", on);
-    chip.disabled = !on && selected.size >= 3;
+    chip.classList.toggle(
+      "genre-chip--blocked",
+      !on && selected.size >= 3
+    );
+    chip.setAttribute("aria-pressed", on ? "true" : "false");
   });
 }
+
+els.genreGrid.addEventListener("click", (e) => {
+  const chip = e.target.closest(".genre-chip");
+  if (!chip || chip.classList.contains("genre-chip--blocked")) return;
+  const id = parseInt(chip.dataset.id, 10);
+  if (!Number.isFinite(id)) return;
+  e.preventDefault();
+  toggleGenre(id);
+});
 
 async function loadGenres() {
   try {
@@ -86,9 +124,76 @@ async function loadGenres() {
   }
 }
 
+async function loadUserPicksFor(targetUserId, { skipClear = false } = {}) {
+  if (!genres.length || targetUserId == null) return;
+  const gen = ++picksRequestGen;
+  if (!skipClear) {
+    clearGenreSelection();
+  }
+  const okIds = validGenreIdSet();
+  try {
+    const data = await fetchJson(
+      `/user-picks?user_id=${encodeURIComponent(targetUserId)}`
+    );
+    if (gen !== picksRequestGen) return;
+    if (currentUserId() !== targetUserId) return;
+
+    selected.clear();
+    const ids = Array.isArray(data.top_genres) ? data.top_genres : [];
+    for (const raw of ids.slice(0, 3)) {
+      const id = typeof raw === "number" ? raw : parseInt(String(raw), 10);
+      if (Number.isFinite(id) && okIds.has(id)) selected.add(id);
+    }
+    syncChipState();
+  } catch (e) {
+    if (gen !== picksRequestGen) return;
+    els.onboardStatus.textContent = e.message;
+    els.onboardStatus.className = "status error";
+  }
+}
+
+function scheduleUserContextReload() {
+  if (initialBoot) return;
+
+  clearTimeout(userSwitchTimer);
+  els.onboardStatus.textContent = "";
+  els.onboardStatus.className = "status";
+
+  userSwitchTimer = setTimeout(async () => {
+    const u = currentUserId();
+
+    if (u === lastAppliedUserId) {
+      return;
+    }
+
+    if (u === null) {
+      lastAppliedUserId = null;
+      clearGenreSelection();
+      els.feedMeta.innerHTML = "";
+      els.movieGrid.innerHTML =
+        '<p class="empty-feed">Enter a user id (1 or higher).</p>';
+      els.feedStatus.textContent = "";
+      return;
+    }
+
+    lastAppliedUserId = u;
+    clearGenreSelection();
+    await loadUserPicksFor(u, { skipClear: true });
+    if (currentUserId() !== u) return;
+    await loadFeed();
+  }, 200);
+}
+
 async function doOnboard() {
   els.onboardStatus.textContent = "";
   els.onboardStatus.className = "status";
+  const u = currentUserId();
+  if (u === null) {
+    els.onboardStatus.textContent = "Enter a valid user id.";
+    els.onboardStatus.className = "status error";
+    return;
+  }
+  sanitizeSelected();
   if (selected.size !== 3) {
     els.onboardStatus.textContent = "Pick exactly three genres.";
     els.onboardStatus.className = "status error";
@@ -98,10 +203,12 @@ async function doOnboard() {
   try {
     await fetchJson("/onboard", {
       method: "POST",
-      body: JSON.stringify({ user_id: uid(), top_genres }),
+      body: JSON.stringify({ user_id: u, top_genres }),
     });
     els.onboardStatus.textContent = "Preferences saved. Loading feed…";
     els.onboardStatus.className = "status ok";
+    lastAppliedUserId = u;
+    await loadUserPicksFor(u, { skipClear: true });
     await loadFeed();
   } catch (e) {
     els.onboardStatus.textContent = e.message;
@@ -114,10 +221,16 @@ async function loadFeed() {
   els.feedStatus.className = "status";
   els.feedMeta.innerHTML = "";
   els.movieGrid.innerHTML = "";
+  const u = currentUserId();
+  if (u === null) {
+    els.movieGrid.innerHTML =
+      '<p class="empty-feed">Enter a user id to see a feed.</p>';
+    return;
+  }
   try {
     const limit = 20;
     const data = await fetchJson(
-      `/feed?user_id=${encodeURIComponent(uid())}&limit=${limit}`
+      `/feed?user_id=${encodeURIComponent(u)}&limit=${limit}`
     );
     const mix = data.mix || {};
     els.feedMeta.innerHTML = `
@@ -161,11 +274,17 @@ function movieCard(item) {
   card.querySelector(".watch-btn").addEventListener("click", async (ev) => {
     const btn = ev.currentTarget;
     const mid = parseInt(btn.dataset.mid, 10);
+    const u = currentUserId();
+    if (u === null) {
+      els.feedStatus.textContent = "Set a valid user id first.";
+      els.feedStatus.className = "status error";
+      return;
+    }
     btn.disabled = true;
     try {
       await fetchJson("/watch", {
         method: "POST",
-        body: JSON.stringify({ user_id: uid(), movie_id: mid }),
+        body: JSON.stringify({ user_id: u, movie_id: mid }),
       });
       await loadFeed();
     } catch (err) {
@@ -183,8 +302,30 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
-els.onboardBtn.addEventListener("click", doOnboard);
-els.refreshFeedBtn.addEventListener("click", loadFeed);
-els.userId.addEventListener("change", () => loadFeed());
+els.onboardBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  doOnboard();
+});
+els.refreshFeedBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  loadFeed();
+});
 
-loadGenres().then(() => loadFeed());
+els.userId.addEventListener("input", scheduleUserContextReload);
+els.userId.addEventListener("change", scheduleUserContextReload);
+
+loadGenres()
+  .then(async () => {
+    const u = currentUserId();
+    if (u !== null) {
+      await loadUserPicksFor(u, { skipClear: false });
+    } else {
+      clearGenreSelection();
+    }
+    await loadFeed();
+    lastAppliedUserId = currentUserId();
+  })
+  .catch(() => {})
+  .finally(() => {
+    initialBoot = false;
+  });

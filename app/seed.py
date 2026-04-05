@@ -18,6 +18,7 @@ from app.models import (
     GenreMovieIndex,
     Movie,
     MovieGenre,
+    UserOnboard,
     UserPrefer,
     UserWatched,
 )
@@ -189,6 +190,7 @@ def reset_catalogue_from_csv() -> None:
     try:
         db.execute(delete(UserWatched))
         db.execute(delete(UserPrefer))
+        db.execute(delete(UserOnboard))
         db.commit()
         load_catalogue_from_csv(db)
         rebuild_genre_movie_index(db)

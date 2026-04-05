@@ -53,6 +53,17 @@ class UserWatched(Base):
     last_watched_at = Column(DateTime, nullable=True)
 
 
+class UserOnboard(Base):
+    """The three genres chosen at onboarding (unchanged when prefers are recomputed)."""
+
+    __tablename__ = "user_onboard"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    genre_id_1 = Column(Integer, ForeignKey("genres.id"), nullable=False)
+    genre_id_2 = Column(Integer, ForeignKey("genres.id"), nullable=False)
+    genre_id_3 = Column(Integer, ForeignKey("genres.id"), nullable=False)
+
+
 class UserPrefer(Base):
     __tablename__ = "user_prefers"
     __table_args__ = (UniqueConstraint("user_id", "genre_id", name="uq_user_genre_pref"),)

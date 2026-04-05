@@ -10,6 +10,7 @@ from app.models import (
     Movie,
     MovieGenre,
     User,
+    UserOnboard,
     UserPrefer,
     UserWatched,
 )
@@ -41,6 +42,12 @@ def onboard_user(db: Session, user_id: int, top_genres: List[int]) -> dict:
     third = 1.0 / 3.0
     for gid in top_genres:
         db.add(UserPrefer(user_id=user_id, genre_id=gid, score=third))
+    row = db.get(UserOnboard, user_id)
+    g1, g2, g3 = top_genres[0], top_genres[1], top_genres[2]
+    if row is None:
+        db.add(UserOnboard(user_id=user_id, genre_id_1=g1, genre_id_2=g2, genre_id_3=g3))
+    else:
+        row.genre_id_1, row.genre_id_2, row.genre_id_3 = g1, g2, g3
     db.commit()
     return {
         "status": "ok",
@@ -48,6 +55,14 @@ def onboard_user(db: Session, user_id: int, top_genres: List[int]) -> dict:
             {"genre_id": gid, "score": round(third, 6)} for gid in top_genres
         ],
     }
+
+
+def get_onboard_genre_ids(db: Session, user_id: int) -> List[int]:
+    """Only genres from explicit onboarding (Save preferences). New users → []."""
+    row = db.get(UserOnboard, user_id)
+    if row is None:
+        return []
+    return [row.genre_id_1, row.genre_id_2, row.genre_id_3]
 
 
 def recompute_user_prefers(db: Session, user_id: int) -> None:

@@ -37,3 +37,8 @@ class FeedResponse(BaseModel):
     user_id: int
     items: List[FeedItem]
     mix: dict
+
+
+class UserPicksResponse(BaseModel):
+    user_id: int
+    top_genres: List[int]

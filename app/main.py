@@ -12,6 +12,7 @@ from app.schemas import (
     FeedResponse,
     OnboardRequest,
     OnboardResponse,
+    UserPicksResponse,
     WatchRequest,
     WatchResponse,
 )
@@ -47,7 +48,10 @@ def root():
     index = STATIC_DIR / "index.html"
     if not index.is_file():
         raise HTTPException(status_code=503, detail="static/index.html missing")
-    return FileResponse(index)
+    return FileResponse(
+        index,
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.post("/onboard", response_model=OnboardResponse)
@@ -75,6 +79,14 @@ def feed(
 ):
     crud.ensure_user(db, user_id)
     return recommender.build_feed(db, user_id=user_id, limit=limit)
+
+
+@app.get("/user-picks", response_model=UserPicksResponse)
+def user_picks(user_id: int = Query(..., ge=1), db: Session = Depends(get_db)):
+    """Genres from last Save preferences (user_onboard); empty if that user never onboarded."""
+    crud.ensure_user(db, user_id)
+    ids = crud.get_onboard_genre_ids(db, user_id)
+    return UserPicksResponse(user_id=user_id, top_genres=ids)
 
 
 @app.get("/genres")
