@@ -776,4 +776,3 @@ The project explicitly documents 5 improvements over the baseline PPT formulatio
 
 ---
 
-*Made with ❤️ by Group SY_10-02 | PICT, Pune*
